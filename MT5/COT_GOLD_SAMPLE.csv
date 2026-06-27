@@ -1,0 +1,7 @@
+# Gold futures — weekly rows: report date (Tuesday as-of), net non-commercial, net commercial
+# Net = long contracts − short contracts (from CFTC Disaggregated or your spreadsheet).
+# Rename to COT_GOLD.csv and copy to MetaTrader 5 MQL5\Files\
+date,net_noncommercial,net_commercial
+2025.12.30,125000,-98000
+2026.01.06,128500,-100200
+2026.01.13,131000,-102500

@@ -1,0 +1,180 @@
+//@version=6
+indicator("Session Sweep Liquidity Grab", shorttitle="SessionSweepLG", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// ----------------------------
+// Inputs
+// ----------------------------
+sessionPreset = input.string("Asia/London/New York", "Session Preset", options=["Asia/London/New York"])
+sessionTz = input.string("Etc/UTC", "Session Timezone")
+
+asiaSession = input.session("0000-0800", "Asia Session")
+londonSession = input.session("0800-1600", "London Session")
+newYorkSession = input.session("1300-2100", "New York Session")
+
+prevHighColor = input.color(color.new(color.red, 0), "Previous Session High Color")
+prevLowColor = input.color(color.new(color.aqua, 0), "Previous Session Low Color")
+sweepHighColor = input.color(color.new(color.orange, 0), "High Sweep Marker Color")
+sweepLowColor = input.color(color.new(color.fuchsia, 0), "Low Sweep Marker Color")
+
+notifyOnSweep = input.bool(true, "Notify On Sweep")
+notifyOnReversalConfirm = input.bool(true, "Notify On Reversal Confirm")
+notifyOnContinuationConfirm = input.bool(true, "Notify On Continuation Confirm")
+allowRepeatAlerts = input.bool(false, "Allow Repeat Alerts")
+
+// ----------------------------
+// Session helpers
+// ----------------------------
+inSession(sess) =>
+    not na(time(timeframe.period, sess, sessionTz))
+
+getSessionId() =>
+    inSession(asiaSession) ? 1 : inSession(londonSession) ? 2 : inSession(newYorkSession) ? 3 : 0
+
+sessionName(id) =>
+    id == 1 ? "Asia" : id == 2 ? "London" : id == 3 ? "NewYork" : "None"
+
+// ----------------------------
+// State
+// ----------------------------
+var int currentSessionId = 0
+var int prevSessionId = 0
+
+var float buildHigh = na
+var float buildLow = na
+
+var float prevSessionHigh = na
+var float prevSessionLow = na
+
+var bool highSwept = false
+var bool lowSwept = false
+
+var int highInsideCloses = 0
+var int highOutsideCloses = 0
+var int lowInsideCloses = 0
+var int lowOutsideCloses = 0
+
+var bool highReversalSent = false
+var bool highContinuationSent = false
+var bool lowReversalSent = false
+var bool lowContinuationSent = false
+
+var line prevHighLine = na
+var line prevLowLine = na
+
+currentId = getSessionId()
+isNewSession = currentId != currentSessionId and currentId != 0
+isSessionBar = currentId != 0
+
+if barstate.isconfirmed
+    if isNewSession
+        prevSessionId := currentSessionId
+        prevSessionHigh := buildHigh
+        prevSessionLow := buildLow
+
+        buildHigh := high
+        buildLow := low
+        currentSessionId := currentId
+
+        highSwept := false
+        lowSwept := false
+        highInsideCloses := 0
+        highOutsideCloses := 0
+        lowInsideCloses := 0
+        lowOutsideCloses := 0
+        highReversalSent := false
+        highContinuationSent := false
+        lowReversalSent := false
+        lowContinuationSent := false
+
+        if not na(prevSessionHigh)
+            if not na(prevHighLine)
+                line.delete(prevHighLine)
+            if not na(prevLowLine)
+                line.delete(prevLowLine)
+            prevHighLine := line.new(bar_index, prevSessionHigh, bar_index + 1, prevSessionHigh, extend=extend.right, color=prevHighColor, width=2)
+            prevLowLine := line.new(bar_index, prevSessionLow, bar_index + 1, prevSessionLow, extend=extend.right, color=prevLowColor, width=2)
+    else if isSessionBar
+        buildHigh := na(buildHigh) ? high : math.max(buildHigh, high)
+        buildLow := na(buildLow) ? low : math.min(buildLow, low)
+        currentSessionId := currentId
+
+hasPrevLevels = not na(prevSessionHigh) and not na(prevSessionLow)
+monitoringNextSession = hasPrevLevels and isSessionBar and currentSessionId != prevSessionId
+
+highSweepThisBar = false
+lowSweepThisBar = false
+highReversalThisBar = false
+highContinuationThisBar = false
+lowReversalThisBar = false
+lowContinuationThisBar = false
+
+if barstate.isconfirmed and monitoringNextSession
+    // Sweep detection
+    if not highSwept and high > prevSessionHigh
+        highSwept := true
+        highSweepThisBar := true
+    if not lowSwept and low < prevSessionLow
+        lowSwept := true
+        lowSweepThisBar := true
+
+    // Two-close confirmation after high sweep
+    if highSwept and not (highReversalSent and highContinuationSent)
+        if close < prevSessionHigh
+            highInsideCloses += 1
+            highOutsideCloses := 0
+        else if close > prevSessionHigh
+            highOutsideCloses += 1
+            highInsideCloses := 0
+        else
+            highInsideCloses := 0
+            highOutsideCloses := 0
+
+        if highInsideCloses >= 2 and (allowRepeatAlerts or not highReversalSent)
+            highReversalThisBar := true
+            highReversalSent := true
+        if highOutsideCloses >= 2 and (allowRepeatAlerts or not highContinuationSent)
+            highContinuationThisBar := true
+            highContinuationSent := true
+
+    // Two-close confirmation after low sweep
+    if lowSwept and not (lowReversalSent and lowContinuationSent)
+        if close > prevSessionLow
+            lowInsideCloses += 1
+            lowOutsideCloses := 0
+        else if close < prevSessionLow
+            lowOutsideCloses += 1
+            lowInsideCloses := 0
+        else
+            lowInsideCloses := 0
+            lowOutsideCloses := 0
+
+        if lowInsideCloses >= 2 and (allowRepeatAlerts or not lowReversalSent)
+            lowReversalThisBar := true
+            lowReversalSent := true
+        if lowOutsideCloses >= 2 and (allowRepeatAlerts or not lowContinuationSent)
+            lowContinuationThisBar := true
+            lowContinuationSent := true
+
+plotshape(highSweepThisBar, title="High Sweep", style=shape.triangledown, location=location.abovebar, color=sweepHighColor, text="HS")
+plotshape(lowSweepThisBar, title="Low Sweep", style=shape.triangleup, location=location.belowbar, color=sweepLowColor, text="LS")
+
+plotshape(highReversalThisBar, title="High Sweep Reversal Short", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), text="REV S")
+plotshape(highContinuationThisBar, title="High Sweep Continuation Long", style=shape.labelup, location=location.abovebar, color=color.new(color.green, 0), text="CONT L")
+plotshape(lowReversalThisBar, title="Low Sweep Reversal Long", style=shape.labelup, location=location.belowbar, color=color.new(color.lime, 0), text="REV L")
+plotshape(lowContinuationThisBar, title="Low Sweep Continuation Short", style=shape.labeldown, location=location.belowbar, color=color.new(color.maroon, 0), text="CONT S")
+
+sweepAlert = notifyOnSweep and (highSweepThisBar or lowSweepThisBar)
+reversalAlert = notifyOnReversalConfirm and (highReversalThisBar or lowReversalThisBar)
+continuationAlert = notifyOnContinuationConfirm and (highContinuationThisBar or lowContinuationThisBar)
+
+alertcondition(sweepAlert, title="Session Sweep Detected", message="Session sweep detected on {{ticker}} {{interval}}")
+alertcondition(reversalAlert, title="Sweep Reversal Confirmed", message="Sweep reversal confirmed on {{ticker}} {{interval}}")
+alertcondition(continuationAlert, title="Sweep Continuation Confirmed", message="Sweep continuation confirmed on {{ticker}} {{interval}}")
+
+var table panel = table.new(position.top_right, 1, 5, border_width=1)
+if barstate.islast
+    table.cell(panel, 0, 0, "Preset: " + sessionPreset)
+    table.cell(panel, 0, 1, "TZ: " + sessionTz)
+    table.cell(panel, 0, 2, "Prev Session: " + sessionName(prevSessionId))
+    table.cell(panel, 0, 3, "Prev H/L: " + str.tostring(prevSessionHigh, format.mintick) + " / " + str.tostring(prevSessionLow, format.mintick))
+    table.cell(panel, 0, 4, "Monitoring: " + sessionName(currentSessionId))
