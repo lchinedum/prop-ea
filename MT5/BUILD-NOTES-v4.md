@@ -491,3 +491,20 @@ Mazi's first MetaEditor compile of v4.9 returned 11 errors / 1 warning, ALL insi
 2. `MqlCalendarValue` has NO `datetime` member — the release-time field is `time` (struct: id, event_id, time, period, revision, actual_value, ...). Three `.datetime` reads replaced with `.time`.
 3. Everything else the compile flagged was cascade from those two. `CalendarValueHistoryByEvent(id, values[], from, to)` argument order was confirmed correct as written; `HasActualValue()/GetActualValue()`, `.period`, `.revision` all confirmed real.
 Version "4.91", panel title v4.91. No logic changes.
+
+# 22. v4.92 (2026-10-16) — the ghost "Label" killed at the root
+
+Mazi's v4.91 live screenshot showed a lone "Label" under the headline, at the fund-check line's slot (InpY+56, object GM_fx). Root cause, from the code: the fx line is conditional — `Lab(PREF "fx", ..., (have && p.is_gold) ? g_fund_check_txt : "", ...)` — and when the fund cross-check is neutral, `g_fund_check_txt` is "" too, so the line is drawn empty in two of three states. Every new OBJ_LABEL is born with the literal text "Label"; on a fresh object the create→set-"" sequence does not stick in his MT5 build, so the object keeps its birth text on screen. `ScrubAllStrayObjects()` could never win the fight: it deletes the object at the start of the draw and the same draw recreates it empty. The ghost therefore appears ONLY in neutral state (any CAUTION/aligned string overwrites the birth text), which is why it survived three earlier "stray label" rounds — the same species had bitten before at other conditional-empty labels (the unused watchlist slots).
+
+Fix — kill the class, not the instance, inside the single choke point `Lab()`:
+- If the text argument is "", Lab() now `ObjectDelete(0, name)`s and returns immediately: a label with nothing to say does not exist. Deletion is visually identical to a successful blank (call sites pass "" exactly to clear stale rows), and no object survives to resurrect the birth string.
+- `ScrubAllStrayObjects()` is unchanged — it still handles foreign orphans (old builds, other tools).
+
+Call-site audit (every `Lab(` call in DrawPanel; Lab has no other callers):
+- Conditional-empty, now delete-on-empty (all correct — they were "blank this row" sites): `fx` (non-gold chart or neutral cross-check), watchlist `w0–w7` (rows past the configured pair count), ladder `l0–l7` (rows past the currency count), `k2–k6` (no-D1-history branch), `k7`/`k8` (no pair state).
+- Guarded, never actually empty: `e` (only called when `g_err != ""`).
+- Never empty by construction (verified against their builders): `t`, `b` (falls back to "-"), `s`, `n`, `rg`, `rs`, `fd` (`g_fetch_diag` initialises to "fetch: not run yet"), `wh`, `lh`, `ls`, `th`, `k1`, `gh`, `g1–g4` (literal prefixes), `gv`, `rh`, `rk1–rk3`, `lg`, `d`.
+
+ObjectFind dependency check: NO code anywhere depends on an empty-text panel label existing. The only `ObjectFind`/`ObjectGet` uses are the two scrubs (they enumerate all chart objects generically), `Rect()` and `Lab()` themselves, and the Refresh button (`GM_btn`, created directly via `ObjectCreate`, never routed through Lab).
+
+Verification (static only — no MQL5 compiler on the build VM): brace/paren/bracket balance 321/321, 1672/1672, 553/553 — the deltas vs v4.91 (320/320, 1670/1670, 553/553) are exactly the guard block's own +1 brace pair and +2 paren pairs, brackets untouched; the diff touches no function signature, so the function set is unchanged and all calls resolve as before; zero order-placement functions. Diff vs the pre-edit v4.91 file is exactly 3 hunks — `#property version`, the panel title string, and the Lab() guard — engine, gate, ladder and every panel string byte-identical. First MetaEditor compile remains Mazi's step; the neutral-state fx slot should now render as clean empty space.

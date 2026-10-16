@@ -14,7 +14,7 @@
 //| AutoTrade can stay off.                                          |
 //+------------------------------------------------------------------+
 #property copyright "general_macro"
-#property version   "4.91"
+#property version   "4.92"
 #property strict
 #property description "General macro bias + framework dashboard. No trading."
 
@@ -3089,7 +3089,7 @@ void DrawPanel(const string status)
    const int fitH = PANEL_FIT_H;
    const int cb = CharBudget();   // v4.6: per-line char budget at the saved width
    Rect(PREF "bg", InpX, InpY, InpWidth, fitH, bg, line);
-   Lab(PREF "t", InpX + 14, InpY + 10, "GENERAL MACRO BIAS v4.91", 11, mut);
+   Lab(PREF "t", InpX + 14, InpY + 10, "GENERAL MACRO BIAS v4.92", 11, mut);
    Lab(PREF "b", InpX + 14, InpY + 32,
        have ? (p.sym + "  " + p.bias + "   " + IntegerToString(p.conv) + "/100") : "-",
        18, acc);
@@ -3400,6 +3400,19 @@ void Rect(const string name, int x, int y, int w, int h, color bg, color br)
 
 void Lab(const string name, int x, int y, const string text, int sz, color c)
 {
+   // v4.92: empty text means "no label" - delete the object and
+   // return. A freshly created OBJ_LABEL is born with the literal
+   // text "Label", and setting "" on it does not stick in every
+   // terminal build: in the v4.91 live run the conditional fx line
+   // rendered its birth text whenever the fund cross-check was
+   // neutral (see BUILD-NOTES). Call sites pass "" precisely to
+   // blank a stale row - deletion produces the same blank, and no
+   // object survives to resurrect the birth string on a later draw.
+   if(text == "")
+   {
+      ObjectDelete(0, name);
+      return;
+   }
    if(ObjectFind(0, name) < 0)
    {
       ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
